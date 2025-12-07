@@ -2,31 +2,30 @@ package com.unitbv.myquiz.controller;
 
 import com.unitbv.myquiz.services.OllamaService;
 import com.unitbv.myquiz.services.QuestionService;
-import com.unitbv.myquizapi.dto.OllamaResponseDto;
+import com.unitbv.myquiz.mappers.OllamaMapper;
+import com.unitbv.myquizapi.dto.*;
 import io.swagger.v3.oas.annotations.Operation;
-import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
-import io.swagger.v3.oas.annotations.media.ExampleObject;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
+import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-import java.time.OffsetDateTime;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-
 /**
- * REST controller for Ollama AI integration endpoints
+ * REST controller for Ollama AI integration endpoints.
+ * Provides capabilities for generating content, improving questions, and correcting text via AI.
  */
 @RestController
 @RequestMapping("/api/ollama")
+@RequiredArgsConstructor // Generates constructor for final attributes
 @Tag(name = "AI Integration", description = "Ollama AI integration for question generation and improvement")
 public class OllamaController {
 
@@ -34,144 +33,43 @@ public class OllamaController {
 
     private final OllamaService ollamaService;
     private final QuestionService questionService;
-
-    @Autowired
-    public OllamaController(OllamaService ollamaService, QuestionService questionService) {
-        this.ollamaService = ollamaService;
-        this.questionService = questionService;
-    }
+    private final OllamaMapper ollamaMapper;
 
     /**
      * Generate AI response using Ollama
      */
     @PostMapping("/generate")
-    @Operation(
-        summary = "Generate AI Response",
-        description = """
-            Generate AI-powered responses using Ollama models for question improvement, 
-            correction, or creation. Supports multiple AI models including llama3.
-            """,
-        requestBody = @io.swagger.v3.oas.annotations.parameters.RequestBody(
-            description = "AI generation request with model and prompt",
-            required = true,
-            content = @Content(
-                mediaType = "application/json",
-                schema = @Schema(
-                    type = "object",
-                    requiredProperties = {"prompt"},
-                    properties = {
-                        @io.swagger.v3.oas.annotations.StringToClassMapItem(
-                            key = "model",
-                            value = Schema.class
-                        ),
-                        @io.swagger.v3.oas.annotations.StringToClassMapItem(
-                            key = "prompt",
-                            value = Schema.class
-                        )
-                    }
-                ),
-                examples = {
-                    @ExampleObject(
-                        name = "Question Correction",
-                        summary = "Correct a quiz question",
-                        value = """
-                            {
-                              "model": "llama3",
-                              "prompt": "Corectează această întrebare de quiz: Care este capitala Franței?"
-                            }
-                            """
-                    ),
-                    @ExampleObject(
-                        name = "Question Generation",
-                        summary = "Generate new questions",
-                        value = """
-                            {
-                              "model": "llama3",
-                              "prompt": "Generate 3 multiple choice questions about Romanian history"
-                            }
-                            """
-                    )
-                }
+    @Operation(summary = "Generate AI Response", description = "Generate AI-powered responses using Ollama models.")
+    @ApiResponses({
+            @ApiResponse(
+                    responseCode = "200",
+                    description = "AI response generated successfully",
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE, schema = @Schema(implementation = OllamaGenerateResponseDto.class))
+            ),
+            @ApiResponse(
+                    responseCode = "400",
+                    description = "Invalid request parameters",
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE)
+            ),
+            @ApiResponse(
+                    responseCode = "500",
+                    description = "AI service error",
+                    content = @Content(schema = @Schema(hidden = true))
             )
-        )
-    )
-    @ApiResponses(value = {
-        @ApiResponse(
-            responseCode = "200",
-            description = "AI response generated successfully",
-            content = @Content(
-                mediaType = "application/json",
-                schema = @Schema(
-                    type = "object",
-                    properties = {
-                        @io.swagger.v3.oas.annotations.StringToClassMapItem(
-                            key = "response",
-                            value = Schema.class
-                        ),
-                        @io.swagger.v3.oas.annotations.StringToClassMapItem(
-                            key = "model",
-                            value = Schema.class
-                        ),
-                        @io.swagger.v3.oas.annotations.StringToClassMapItem(
-                            key = "timestamp",
-                            value = Schema.class
-                        )
-                    }
-                ),
-                examples = @ExampleObject(
-                    value = """
-                        {
-                          "response": "Întrebarea corectată: Care este capitala Franței?\nA) Londra\nB) Paris\nC) Berlin\nD) Madrid\n\nRăspuns corect: B) Paris",
-                          "model": "llama3",
-                          "timestamp": "2025-10-10T14:30:00"
-                        }
-                        """
-                )
-            )
-        ),
-        @ApiResponse(
-            responseCode = "400",
-            description = "Invalid request - missing or empty prompt",
-            content = @Content(schema = @Schema(ref = "#/components/schemas/ErrorResponse"))
-        ),
-        @ApiResponse(
-            responseCode = "500",
-            description = "AI service error or internal server error",
-            content = @Content(schema = @Schema(ref = "#/components/schemas/ErrorResponse"))
-        )
     })
-    public ResponseEntity<Map<String, Object>> generateResponse(
-            @RequestBody Map<String, String> request) {
+    public ResponseEntity<OllamaGenerateResponseDto> generateResponse(
+            @Valid @RequestBody OllamaGenerateRequestDto request) {
+
         try {
-            String model = request.getOrDefault("model", "llama3");
-            String prompt = request.get("prompt");
+            logger.info("Generating AI response with model: {}", request.getModel());
 
-            if (prompt == null || prompt.trim().isEmpty()) {
-                Map<String, Object> errorResponse = new HashMap<>();
-                errorResponse.put("error", "Bad Request");
-                errorResponse.put("message", "Prompt is required and cannot be empty");
-                errorResponse.put("timestamp", OffsetDateTime.now());
-                return ResponseEntity.badRequest().body(errorResponse);
-            }
+            OllamaResponseDto serviceResponse = ollamaService.generateResponse(request.getModel(), request.getPrompt());
 
-            logger.info("Generating AI response with model: {} for prompt length: {}", model, prompt.length());
-
-            OllamaResponseDto aiResponse = ollamaService.generateResponse(model, prompt);
-
-            Map<String, Object> response = new HashMap<>();
-            response.put("response", aiResponse.getResponse());
-            response.put("model", model);
-            response.put("timestamp", OffsetDateTime.now());
-
-            return ResponseEntity.ok(response);
+            return ResponseEntity.ok(ollamaMapper.toGenerateResponse(serviceResponse, request.getModel()));
 
         } catch (Exception e) {
             logger.error("Error generating AI response", e);
-            Map<String, Object> errorResponse = new HashMap<>();
-            errorResponse.put("error", "AI Generation Failed");
-            errorResponse.put("message", e.getMessage());
-            errorResponse.put("timestamp", OffsetDateTime.now());
-            return ResponseEntity.internalServerError().body(errorResponse);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
         }
     }
 
@@ -179,142 +77,100 @@ public class OllamaController {
      * Improve questions using AI
      */
     @PostMapping("/improve-questions")
-    @Operation(
-        summary = "AI Question Improvement",
-        description = """
-            Use AI to improve existing questions by providing suggestions for better wording, 
-            more accurate options, or enhanced clarity. Can process single questions or batches.
-            """
-    )
-    @ApiResponses(value = {
-        @ApiResponse(responseCode = "200", description = "Questions improved successfully"),
-        @ApiResponse(responseCode = "400", description = "Invalid question data"),
-        @ApiResponse(responseCode = "500", description = "AI improvement service error")
+    @Operation(summary = "AI Question Improvement", description = "Use AI to improve existing questions wording and clarity.")
+    @ApiResponses({
+            @ApiResponse(
+                    responseCode = "200",
+                    description = "Questions improvement started",
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE, schema = @Schema(implementation = ImproveQuestionsResponseDto.class))
+            ),
+            @ApiResponse(
+                    responseCode = "500",
+                    description = "Internal server error",
+                    content = @Content(schema = @Schema(hidden = true))
+            )
     })
-    public ResponseEntity<Map<String, Object>> improveQuestions(
-            @Parameter(description = "Question IDs to improve", required = true)
-            @RequestBody List<Long> questionIds) {
+    public ResponseEntity<ImproveQuestionsResponseDto> improveQuestions(
+            @Valid @RequestBody ImproveQuestionsRequestDto request) {
+
         try {
-            Map<String, Object> response = new HashMap<>();
-            response.put("message", "Question improvement process initiated");
-            response.put("questionIds", questionIds);
-            response.put("timestamp", OffsetDateTime.now());
+            logger.info("Processing {} questions for AI improvement", request.getQuestionIds().size());
 
-            // Implementation would process questions through AI for improvement
-            logger.info("Processing {} questions for AI improvement", questionIds.size());
+            // TODO: Add logic to process questions in service layer or receive questions directly in request?
 
-            return ResponseEntity.ok(response);
+            // Send request data as template
+            return ResponseEntity.ok(ollamaMapper.toImproveResponse(request.getQuestionIds()));
+
         } catch (Exception e) {
-            logger.error("Error improving questions with AI", e);
-            return ResponseEntity.internalServerError()
-                .body(Map.of("error", "Question improvement failed",
-                           "message", e.getMessage()));
+            logger.error("Error improving questions", e);
+            return ResponseEntity.internalServerError().build();
         }
     }
 
     /**
-     * Get AI model status and availability
+     * Get AI model status
      */
     @GetMapping("/status")
-    @Operation(
-        summary = "AI Service Status",
-        description = "Check the availability and status of AI models and services"
-    )
-    @ApiResponses(value = {
-        @ApiResponse(responseCode = "200", description = "AI service status retrieved"),
-        @ApiResponse(responseCode = "503", description = "AI service unavailable")
+    @Operation(summary = "AI Service Status", description = "Check the availability and status of AI models.")
+    @ApiResponses({
+            @ApiResponse(
+                    responseCode = "200",
+                    description = "Status retrieved - Operational",
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE, schema = @Schema(implementation = OllamaStatusResponseDto.class))
+            ),
+            @ApiResponse(
+                    responseCode = "503",
+                    description = "Service unavailable - Not Operational",
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE, schema = @Schema(implementation = OllamaStatusResponseDto.class))
+            )
     })
-    public ResponseEntity<Map<String, Object>> getAIStatus() {
+    public ResponseEntity<OllamaStatusResponseDto> getAIStatus() {
         try {
-            Map<String, Object> status = new HashMap<>();
-            boolean response = ollamaService.testConnection();
-            if (response) {
-                status.put("service", "Ollama AI Integration");
-                status.put("status", "operational");
-                status.put("availableModels", List.of("llama3", "codellama", "mistral"));
-                status.put("timestamp", OffsetDateTime.now());
-            } else {
-                status.put("service", "Ollama AI Integration");
-                status.put("status", "offline");
-                status.put("timestamp", OffsetDateTime.now());
-                return ResponseEntity.status(503).body(status);
-            }
-            return ResponseEntity.ok(status);
+            boolean isOperational = ollamaService.testConnection();
+            OllamaStatusResponseDto response = ollamaMapper.toStatusResponse(isOperational);
+
+            return isOperational
+                    ? ResponseEntity.ok(response)
+                    : ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(response);
+
         } catch (Exception e) {
-            logger.error("Error checking AI service status", e);
-            return ResponseEntity.status(503)
-                .body(Map.of("service", "Ollama AI Integration",
-                           "status", "unavailable",
-                           "error", e.getMessage()));
+            logger.error("Error checking status", e);
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).build();
         }
     }
 
+    /**
+     * Correct text using AI
+     */
     @PostMapping("/correct-text")
-    @Operation(
-        summary = "Correct question text using AI",
-        description = "Corrects the provided question text using an AI model. Optionally specify the language (default: 'ro')."
-    )
-    @io.swagger.v3.oas.annotations.parameters.RequestBody(
-        description = "Request body containing the text to correct and optional language code",
-        required = true,
-        content = @Content(
-            mediaType = "application/json",
-            schema = @Schema(
-                example = "{\"text\": \"Teext cu erori.\", \"language\": \"ro\"}"
+    @Operation(summary = "Correct question text", description = "Corrects the provided question text using AI.")
+    @ApiResponses({
+            @ApiResponse(
+                    responseCode = "200",
+                    description = "Text corrected",
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE, schema = @Schema(implementation = CorrectTextResponseDto.class))
+            ),
+            @ApiResponse(
+                    responseCode = "503",
+                    description = "AI Service unavailable",
+                    content = @Content(schema = @Schema(hidden = true))
             )
-        )
-    )
-    @ApiResponses(value = {
-        @ApiResponse(
-            responseCode = "200",
-            description = "Text corrected successfully",
-            content = @Content(
-                mediaType = "application/json",
-                schema = @Schema(
-                    example = "{\"original\": \"Teext cu erori.\", \"corrected\": \"Text cu erori.\", \"language\": \"ro\", \"timestamp\": \"2024-06-01T12:00:00\"}"
-                )
-            )
-        ),
-        @ApiResponse(
-            responseCode = "400",
-            description = "Bad request - text is missing or empty",
-            content = @Content(
-                mediaType = "application/json",
-                schema = @Schema(
-                    example = "{\"error\": \"Bad Request\", \"message\": \"Text is required and cannot be empty\", \"timestamp\": \"2024-06-01T12:00:00\"}"
-                )
-            )
-        )
     })
-    public ResponseEntity<Map<String, Object>> correctText(@RequestBody Map<String, String> request) {
-        String text = request.get("text");
-        String language = request.getOrDefault("language", "ro");
-
-        if (text == null || text.trim().isEmpty()) {
-            Map<String, Object> errorResponse = new HashMap<>();
-            errorResponse.put("error", "Bad Request");
-            errorResponse.put("message", "Text is required and cannot be empty");
-            errorResponse.put("timestamp", OffsetDateTime.now());
-            return ResponseEntity.badRequest().body(errorResponse);
-        }
+    public ResponseEntity<CorrectTextResponseDto> correctText(
+            @Valid @RequestBody CorrectTextRequestDto request) {
 
         try {
-            String corrected = ollamaService.correctQuestionText(text, language);
+            String corrected = ollamaService.correctQuestionText(request.getText(), request.getLanguage());
 
-            Map<String, Object> response = new HashMap<>();
-            response.put("original", text);
-            response.put("corrected", corrected);
-            response.put("language", language);
-            response.put("timestamp", OffsetDateTime.now());
+            return ResponseEntity.ok(ollamaMapper.toCorrectTextResponse(
+                    request.getText(),
+                    corrected,
+                    request.getLanguage()
+            ));
 
-            return ResponseEntity.ok(response);
         } catch (Exception e) {
-            logger.error("Error correcting text with Ollama AI", e);
-            Map<String, Object> errorResponse = new HashMap<>();
-            errorResponse.put("error", "AI Service Error");
-            errorResponse.put("message", e.getMessage());
-            errorResponse.put("timestamp", OffsetDateTime.now());
-            return ResponseEntity.status(503).body(errorResponse);
+            logger.error("Error correcting text", e);
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).build();
         }
     }
 }
